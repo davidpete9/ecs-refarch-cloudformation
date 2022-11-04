@@ -57,11 +57,12 @@ Resources:
     Properties:
       Family: refinery
       ContainerDefinitions:
-        - Name: refinery-backend-service
+        - Name: refinery-service
           Essential: true
           Image: '336744566914.dkr.ecr.us-east-1.amazonaws.com/refinery:latest'
           PortMappings:
             - ContainerPort: '1312'
+              HostPort: '80'
               Protocol: tcp
           MountPoints: []
           VolumesFrom: []
@@ -85,7 +86,7 @@ Resources:
       Port: 80
       Protocol: HTTP
       Matcher:
-        HttpCode: 200-299
+        HttpCode: 200-405
       HealthCheckIntervalSeconds: 10
       HealthCheckPath: /
       HealthCheckProtocol: HTTP
