@@ -24,11 +24,6 @@ Parameters:
     Type: String
     Default: /
 
-  DesiredCount:
-    Description: How many instances of this task should we run across our cluster?
-    Type: Number
-    Default: 1
-
   MaxCount:
     Description: Maximum number of instances of this task we can run across our cluster
     Type: Number
@@ -38,14 +33,42 @@ Parameters:
     Description: The ECS service auto scaling role ARN
     Type: String
 
+  Subnets:
+    Description: Choose which subnets this ECS cluster should be deployed to
+    Type: List<AWS::EC2::Subnet::Id>
+
+  LoadBalancerSecurityGroup:
+    Description: Load balancer SG ID.
+    Type: AWS::EC2::SecurityGroup::Id
+
 Resources:
+
+  # Define who can reach our tasks
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Access to task containers.
+      SecurityGroupIngress:
+        # Allow access from ELB only
+        - SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+          IpProtocol: -1
+      Tags:
+        - Key: Name
+          Value: refinery-task-sg
+
+
   Service:
     Type: AWS::ECS::Service
     DependsOn: ListenerRule
     Properties:
-      Cluster: !Ref Cluster
-      Role: !Ref ServiceRole
+      Cluster: !Ref Cluster #Role: !Ref ServiceRole
       DesiredCount: !Ref DesiredCount
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref Subnets
+          SecurityGroups:
+            - !Ref TaskSecurityGroup
       TaskDefinition: !Ref TaskDefinition
       LoadBalancers:
         - ContainerName: "refinery-service"
@@ -56,13 +79,45 @@ Resources:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: refinery
+      TaskRoleArn: "arn:aws:iam::336744566914:role/taskdef-montoring"
+      NetworkMode: awsvpc
       ContainerDefinitions:
+        - Name: aws-otel-collector
+          Image: public.ecr.aws/aws-observability/aws-otel-collector:v0.21.1
+          Memory: 300
+          Cpu: 50
+          Links: []
+          PortMappings:
+          - ContainerPort: 2000
+            Protocol: udp
+          - ContainerPort: 4317
+            Protocol: tcp
+          - ContainerPort: 8125
+            Protocol: udp
+          Essential: true
+          EntryPoint: []
+          Command:
+          - "--config=/etc/ecs/ecs-amp-xray.yaml"
+          Environment:
+          - Name: AWS_PROMETHEUS_ENDPOINT
+            Value: https://aps-workspaces.us-east-1.amazonaws.com/workspaces/ws-3c50de28-8b09-45d9-95ed-f3a811696041/api/v1/remote_write
+          EnvironmentFiles: []
+          MountPoints: []
+          VolumesFrom: []
+          Secrets: []
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'true'
+              awslogs-group: "/ecs/ecs-aws-otel-sidecar-collector"
+              awslogs-region: us-east-1
+              awslogs-stream-prefix: ecs
+          SystemControls: []
         - Name: refinery-service
           Essential: true
           Image: '336744566914.dkr.ecr.us-east-1.amazonaws.com/refinery:latest'
           PortMappings:
-            - ContainerPort: '1312'
-              HostPort: '80'
+            - ContainerPort: 1312
               Protocol: tcp
           MountPoints: []
           VolumesFrom: []
@@ -83,8 +138,9 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       VpcId: !Ref VPC
-      Port: 80
+      Port: 1312
       Protocol: HTTP
+      TargetType: ip
       Matcher:
         HttpCode: 200-405
       HealthCheckIntervalSeconds: 10
@@ -109,44 +165,44 @@ Resources:
   # This IAM Role grants the service access to register/unregister with the
   # Application Load Balancer (ALB). It is based on the default documented here:
   # http://docs.aws.amazon.com/AmazonECS/latest/developerguide/service_IAM_role.html
-  ServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub ecs-service-${AWS::StackName}
-      Path: /
-      AssumeRolePolicyDocument: |
-        {
-            "Statement": [{
-                "Effect": "Allow",
-                "Principal": { "Service": [ "ecs.amazonaws.com" ]},
-                "Action": [ "sts:AssumeRole" ]
-            }]
-        }
-      Policies:
-        - PolicyName: !Sub ecs-service-${AWS::StackName}
-          PolicyDocument:
-            {
-              "Version": "2012-10-17",
-              "Statement":
-                [
-                  {
-                    "Effect": "Allow",
-                    "Action":
-                      [
-                        "ec2:AuthorizeSecurityGroupIngress",
-                        "ec2:Describe*",
-                        "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
-                        "elasticloadbalancing:Describe*",
-                        "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
-                        "elasticloadbalancing:DeregisterTargets",
-                        "elasticloadbalancing:DescribeTargetGroups",
-                        "elasticloadbalancing:DescribeTargetHealth",
-                        "elasticloadbalancing:RegisterTargets"
-                      ],
-                    "Resource": "*"
-                  }
-                ]
-            }
+  #ServiceRole:
+  #  Type: AWS::IAM::Role
+  #  Properties:
+  #    RoleName: !Sub ecs-service-${AWS::StackName}
+  #    Path: /
+  #    AssumeRolePolicyDocument: |
+  #      {
+  #          "Statement": [{
+  #              "Effect": "Allow",
+  #              "Principal": { "Service": [ "ecs.amazonaws.com" ]},
+  #              "Action": [ "sts:AssumeRole" ]
+  #          }]
+  #      }
+  #    Policies:
+  #      - PolicyName: !Sub ecs-service-${AWS::StackName}
+  #        PolicyDocument:
+  #          {
+  #            "Version": "2012-10-17",
+  #            "Statement":
+  #              [
+  #                {
+  #                  "Effect": "Allow",
+  #                  "Action":
+  #                    [
+  #                      "ec2:AuthorizeSecurityGroupIngress",
+  #                      "ec2:Describe*",
+  #                      "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
+  #                      "elasticloadbalancing:Describe*",
+  #                      "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
+  #                      "elasticloadbalancing:DeregisterTargets",
+  #                      "elasticloadbalancing:DescribeTargetGroups",
+  #                      "elasticloadbalancing:DescribeTargetHealth",
+  #                      "elasticloadbalancing:RegisterTargets"
+  #                    ],
+  #                  "Resource": "*"
+  #                }
+  #              ]
+  #          }
 
   ServiceScalableTarget:
     Type: "AWS::ApplicationAutoScaling::ScalableTarget"
