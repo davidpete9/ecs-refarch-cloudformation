@@ -29,6 +29,24 @@ Parameters:
     Type: Number
     Default: 1
 
+  BastionHostAMI:
+    Description: Bastion host AMI
+    Type: String
+    Default: ami-070b208e993b59cea
+
+  RefineryImage:
+    Description: Refinery image url
+    Type: String
+
+  MonitoringRoleArn:
+    Description: Monitoring role arn
+    Type: String
+
+  PrometheusRemoteWriteUrl:
+    Description: Prometheus remote write url
+    Type: String
+    Default: https://aps-workspaces.us-east-1.amazonaws.com/workspaces/ws-3c50de28-8b09-45d9-95ed-f3a811696041/api/v1/remote_write
+
 
 
 Resources:
@@ -52,7 +70,40 @@ Resources:
         EnvironmentName: !Ref AWS::StackName
         VPC: !GetAtt VPC.Outputs.VPC
 
+  BastionHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref BastionHostAMI
+      InstanceType: t2.micro
+      KeyName: david2
+      NetworkInterfaces:
+        - SubnetId: !GetAtt VPC.Outputs.PublicSubnet1
+          AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          GroupSet: [!GetAtt SecurityGroups.Outputs.BastionHostSecurityGroup]
+      Tags:
+        - Key: Name
+          Value: bastion
+
+ 
+  PrivateSubnetInterface:
+    Type: AWS::EC2::NetworkInterface
+    Properties: 
+      Description: Private subnet interface to be attached to bastion host
+      GroupSet: [!GetAtt SecurityGroups.Outputs.BastionHostSecurityGroup]
+      SubnetId: !GetAtt VPC.Outputs.PrivateSubnet1
+
+
+  NwIfAt:
+    Type: AWS::EC2::NetworkInterfaceAttachment
+    Properties: 
+      DeleteOnTermination: true
+      DeviceIndex: "1"
+      InstanceId: !Ref BastionHost
+      NetworkInterfaceId: !Ref PrivateSubnetInterface
+
   ALB:
+    DependsOn: VPC
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: https://s3.amazonaws.com/ecs-refarch-cloudformation/infrastructure/load-balancers.yaml
@@ -87,6 +138,9 @@ Resources:
           Subnets: !GetAtt VPC.Outputs.PrivateSubnets
           LoadBalancerSecurityGroup: !GetAtt SecurityGroups.Outputs.LoadBalancerSecurityGroup
           ECSServiceAutoScalingRoleARN: !GetAtt ECS.Outputs.ECSServiceAutoScalingRole
+          PrometheusRemoteWriteUrl: !Ref PrometheusRemoteWriteUrl
+          MonitoringRoleArn: !Ref MonitoringRoleArn
+          RefineryImage: !Ref RefineryImage
 
   LifecycleHook:
     Type: AWS::CloudFormation::Stack

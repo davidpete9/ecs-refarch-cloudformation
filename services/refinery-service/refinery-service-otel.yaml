@@ -37,6 +37,20 @@ Parameters:
     Description: Choose which subnets this ECS cluster should be deployed to
     Type: List<AWS::EC2::Subnet::Id>
 
+
+  RefineryImage:
+    Description: Refinery image url
+    Type: String
+
+  MonitoringRoleArn:
+    Description: Monitoring role arn
+    Type: String
+
+  PrometheusRemoteWriteUrl:
+    Description: Prometheus remote write url
+    Type: String
+    Default: https://aps-workspaces.us-east-1.amazonaws.com/workspaces/ws-3c50de28-8b09-45d9-95ed-f3a811696041/api/v1/remote_write
+
   LoadBalancerSecurityGroup:
     Description: Load balancer SG ID.
     Type: AWS::EC2::SecurityGroup::Id
@@ -74,12 +88,15 @@ Resources:
         - ContainerName: "refinery-service"
           ContainerPort: 1312
           TargetGroupArn: !Ref TargetGroup
+        - ContainerName: "refinery-service"
+          ContainerPort: 1312
+          TargetGroupArn: !Ref TargetGroupWs
 
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: refinery
-      TaskRoleArn: "arn:aws:iam::336744566914:role/taskdef-montoring"
+      TaskRoleArn: !Ref MonitoringRoleArn
       NetworkMode: awsvpc
       ContainerDefinitions:
         - Name: aws-otel-collector
@@ -99,8 +116,8 @@ Resources:
           Command:
           - "--config=/etc/ecs/ecs-amp-xray.yaml"
           Environment:
-          - Name: AWS_PROMETHEUS_ENDPOINT
-            Value: https://aps-workspaces.us-east-1.amazonaws.com/workspaces/ws-3c50de28-8b09-45d9-95ed-f3a811696041/api/v1/remote_write
+          - Name: AWS_PROMETHEUS_ENDPOINT 
+            Value: !Ref PrometheusRemoteWriteUrl
           EnvironmentFiles: []
           MountPoints: []
           VolumesFrom: []
@@ -115,7 +132,7 @@ Resources:
           SystemControls: []
         - Name: refinery-service
           Essential: true
-          Image: '336744566914.dkr.ecr.us-east-1.amazonaws.com/refinery:latest'
+          Image: !Ref RefineryImage
           PortMappings:
             - ContainerPort: 1312
               Protocol: tcp
@@ -142,14 +159,48 @@ Resources:
       Protocol: HTTP
       TargetType: ip
       Matcher:
-        HttpCode: 200-405
+        HttpCode: 200-404
       HealthCheckIntervalSeconds: 10
       HealthCheckPath: /
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
 
+  TargetGroupWs:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VPC
+      Port: 1312
+      Protocol: HTTP
+      TargetType: ip
+      Matcher:
+        HttpCode: 405
+      TargetGroupAttributes: 
+        - Key: stickiness.enabled
+          Value: true
+        - Key: stickiness.type
+          Value: lb_cookie
+      HealthCheckIntervalSeconds: 20
+      HealthCheckPath: /xtext-service
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2 
+
   ListenerRule:
+    DependsOn: ListenerWs
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref Listener
+      Priority: 3
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - !Ref Path
+      Actions:
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+
+  ListenerWs:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
       ListenerArn: !Ref Listener
@@ -157,9 +208,9 @@ Resources:
       Conditions:
         - Field: path-pattern
           Values:
-            - !Ref Path
+            - /xtext-service
       Actions:
-        - TargetGroupArn: !Ref TargetGroup
+        - TargetGroupArn: !Ref TargetGroupWs
           Type: forward
 
   # This IAM Role grants the service access to register/unregister with the
