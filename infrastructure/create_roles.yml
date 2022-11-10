@@ -1,0 +1,143 @@
+Description: >
+  Create the required roles to run the cloudformation to create refinery infrastructure
+
+Resources:
+
+  ECSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      RoleName: ECSRole
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Action": "sts:AssumeRole",
+                "Effect": "Allow",
+                "Principal": {
+                    "Service": "ec2.amazonaws.com"
+                }
+            }]
+        }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: ecs-service
+          PolicyDocument: |
+            {
+                "Statement": [{
+                    "Effect": "Allow",
+                    "Action": [
+                        "ecs:CreateCluster",
+                        "ecs:DeregisterContainerInstance",
+                        "ecs:DiscoverPollEndpoint",
+                        "ecs:Poll",
+                        "ecs:RegisterContainerInstance",
+                        "ecs:StartTelemetrySession",
+                        "ecs:Submit*",
+                        "ecr:BatchCheckLayerAvailability",
+                        "ecr:BatchGetImage",
+                        "ecr:GetDownloadUrlForLayer",
+                        "ecr:GetAuthorizationToken"
+                    ],
+                    "Resource": "*"
+                }]
+            }
+
+  ECSServiceAutoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ECSServiceAutoScalingRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Action:
+            - "sts:AssumeRole"
+          Effect: Allow
+          Principal:
+            Service:
+              - application-autoscaling.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: ecs-service-autoscaling
+          PolicyDocument:
+            Statement:
+              Effect: Allow
+              Action:
+                - application-autoscaling:*
+                - cloudwatch:DescribeAlarms
+                - cloudwatch:PutMetricAlarm
+                - ecs:DescribeServices
+                - ecs:UpdateService
+              Resource: "*"
+
+  MonitoringRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: MonitoringRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Action:
+            - "sts:AssumeRole"
+          Effect: Allow
+          Principal:
+            Service:
+              - ecs-tasks.amazonaws.com
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/AmazonPrometheusRemoteWriteAccess
+
+
+  PassRolePolicy:
+    Type: AWS::IAM::Policy
+    DependsOn: 
+      - MonitoringRole
+      - ECSServiceAutoScalingRole
+      - ECSRole
+    Properties:
+      PolicyName: pass-role-policy
+      PolicyDocument: !Sub |
+            {
+                "Statement": [{
+                    "Effect": "Allow",
+                    "Action": [
+                        "iam:PassRole"
+                    ],
+                    "Resource": [
+                      "${ECSRole.Arn}",
+                      "${ECSServiceAutoScalingRole.Arn}",
+                      "${MonitoringRole.Arn}"
+                    ]
+                }]
+            }
+      Roles:
+        - !Ref ECSRole
+
+  
+  ECSInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref ECSRole
+
+
+Outputs:
+
+  MonitoringRole:
+    Description: Role for OTEL collector
+    Value: !GetAtt MonitoringRole.Arn
+
+  ECSServiceAutoScalingRole:
+    Description: Role for ECS service autoscaling
+    Value: !GetAtt ECSServiceAutoScalingRole.Arn
+
+  ECSInstanceProfile:
+    Description: ECS instance profile
+    Value: !GetAtt ECSInstanceProfile.Arn
+
+    
+
