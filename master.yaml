@@ -15,28 +15,59 @@ Parameters:
     Description: How many ECS hosts do you want to initially deploy?
     Type: Number
     Default: 1
+    
+  MaxSize:
+    Description: Max number of ecs hosts
+    Type: Number
+    Default: 3
+
+  CertificateArn:
+    Description: The arn of the ssl cerficate of xtext.test.refinery.services
+    Type: String
+    Default: arn:aws:acm:us-east-1:764487087921:certificate/ad4bcb8d-320f-4a9e-86ca-301516b2a838
 
   BastionHostAMI:
-    Description: Bastion host AMI
+    Description: Bastion host AMI (micro tier)
     Type: String
-    Default: ami-070b208e993b59cea
+    Default: ami-09d3b3274b6c5d4aa
 
   RefineryImage:
     Description: Refinery image url
     Type: String
+    Default: 764487087921.dkr.ecr.us-east-1.amazonaws.com/refinery:latest
 
   MonitoringRoleArn:
     Description: Monitoring role arn
     Type: String
+    Default: arn:aws:iam::764487087921:role/MonitoringRole
+
+  KeyName:
+    Description: Keyname
+    Type: String
+    Default: refinery_key
+
+  ECSInstanceProfile:
+    Description: ECS instance profile
+    Type: String
+    Default: arn:aws:iam::764487087921:instance-profile/refinery-roles-ECSInstanceProfile-pvke2vRDasJ4
+
+  ECSServiceAutoscalingRoleArn:
+    Description: ECS service autoscaling role arn
+    Type: String
+    Default: arn:aws:iam::764487087921:role/ECSServiceAutoScalingRole
 
   PrometheusRemoteWriteUrl:
     Description: Prometheus remote write url
     Type: String
-    Default: https://aps-workspaces.us-east-1.amazonaws.com/workspaces/ws-3c50de28-8b09-45d9-95ed-f3a811696041/api/v1/remote_write
+    Default: https://aps-workspaces.us-east-1.amazonaws.com/workspaces/ws-d59302a8-3858-4815-83e3-4e6519150ea4/api/v1/remote_write
 
-
+  HostedZoneId:
+    Description: ID of the refinery.services zone
+    Type: String
+    Default: Z01642793NF306ISDD0PX
 
 Resources:
+
   VPC:
     Type: AWS::CloudFormation::Stack
     Properties:
@@ -62,7 +93,7 @@ Resources:
     Properties:
       ImageId: !Ref BastionHostAMI
       InstanceType: t2.micro
-      KeyName: david2
+      KeyName: !Ref KeyName
       NetworkInterfaces:
         - SubnetId: !GetAtt VPC.Outputs.PublicSubnet1
           AssociatePublicIpAddress: "true"
@@ -93,51 +124,68 @@ Resources:
     DependsOn: VPC
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://s3.amazonaws.com/ecs-refarch-cloudformation/infrastructure/load-balancers.yaml
+      TemplateURL: https://refinery-cloudformation-templates.s3.amazonaws.com/load-balancers.yaml
       Parameters:
         EnvironmentName: !Ref AWS::StackName
         VPC: !GetAtt VPC.Outputs.VPC
         Subnets: !GetAtt VPC.Outputs.PublicSubnets
         SecurityGroup: !GetAtt SecurityGroups.Outputs.LoadBalancerSecurityGroup
+        CertificateArn: !Ref CertificateArn
 
   ECS:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://refinery-templates.s3.amazonaws.com/ecs-cluster.yaml
+      TemplateURL: https://refinery-cloudformation-templates.s3.amazonaws.com/ecs-cluster.yaml
       Parameters:
         EnvironmentName: !Ref AWS::StackName
         InstanceType: !Ref InstanceType
         ClusterSize: !Ref ClusterSize
         VPC: !GetAtt VPC.Outputs.VPC
+        KeyName: !Ref KeyName
+        MaxSize: !Ref MaxSize
+        ECSInstanceProfile: !Ref ECSInstanceProfile
         SecurityGroup: !GetAtt SecurityGroups.Outputs.ECSHostSecurityGroup
         Subnets: !GetAtt VPC.Outputs.PrivateSubnets
 
   RefineryService:
     Type: AWS::CloudFormation::Stack
     Properties:
-        TemplateURL: https://refinery-templates.s3.amazonaws.com/refinery-service-otel.yaml
+        TemplateURL: https://refinery-cloudformation-templates.s3.amazonaws.com/refinery-service-otel.yaml
         Parameters:
           VPC: !GetAtt VPC.Outputs.VPC
-          DesiredCount: 2
+          DesiredCount: 1
           Listener: !GetAtt ALB.Outputs.Listener
           Path: /
           Cluster: !GetAtt ECS.Outputs.Cluster
           Subnets: !GetAtt VPC.Outputs.PrivateSubnets
           LoadBalancerSecurityGroup: !GetAtt SecurityGroups.Outputs.LoadBalancerSecurityGroup
-          ECSServiceAutoScalingRoleARN: !GetAtt ECS.Outputs.ECSServiceAutoScalingRole
+          ECSServiceAutoScalingRoleARN: !Ref ECSServiceAutoscalingRoleArn
           PrometheusRemoteWriteUrl: !Ref PrometheusRemoteWriteUrl
           MonitoringRoleArn: !Ref MonitoringRoleArn
           RefineryImage: !Ref RefineryImage
+          LoadBalancerListenerHTTPS: !GetAtt ALB.Outputs.LoadBalancerListenerHTTPS
 
-  LifecycleHook:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      TemplateURL: https://refinery-templates.s3.amazonaws.com/lifecyclehook.yaml
-      Parameters:
-        Cluster: !GetAtt ECS.Outputs.Cluster
-        ECSAutoScalingGroupName: !GetAtt ECS.Outputs.ECSAutoScalingGroupName
+  CNAMERecorSet:
+    Type: AWS::Route53::RecordSet
+    Properties: 
+      HostedZoneId: !Ref HostedZoneId
+      Type: CNAME 
+      Name: xtext.test.refinery.services
+      TTL: 60
+      ResourceRecords: 
+        - !GetAtt ALB.Outputs.LoadBalancerUrl
 
-Outputs:
+
+
+  #LifecycleHook:
+  #  Type: AWS::CloudFormation::Stack
+  #  Properties:
+  #    TemplateURL: https://refinery-templates.s3.amazonaws.com/lifecyclehook.yaml
+  #    Parameters:
+  #      Cluster: !GetAtt ECS.Outputs.Cluster
+  #      ECSAutoScalingGroupName: !GetAtt ECS.Outputs.ECSAutoScalingGroupName
+
+Outputs:            
 
   RefineryServiceUrl:
     Description: The URL endpoint for the website service

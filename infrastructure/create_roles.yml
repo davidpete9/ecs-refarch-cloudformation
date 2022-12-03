@@ -89,6 +89,24 @@ Resources:
         - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
         - arn:aws:iam::aws:policy/AmazonPrometheusRemoteWriteAccess
+    
+
+  IamRolesForGrafana:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: IamRolesForGrafana
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Action:
+            - "sts:AssumeRole"
+          Effect: Allow
+          Principal:
+            Service:
+              - ecs-tasks.amazonaws.com
+      Path: /
+
+
 
 
   PassRolePolicy:
@@ -113,8 +131,8 @@ Resources:
                     ]
                 }]
             }
-      Roles:
-        - !Ref ECSRole
+      Users:
+        - david.pete
 
   
   ECSInstanceProfile:

@@ -15,6 +15,10 @@ Parameters:
     Type: Number
     Default: 1
 
+  LoadBalancerListenerHTTPS:
+    Description: The Application Load Balancer https.
+    Type: String
+
   Listener:
     Description: The Application Load Balancer listener to register with
     Type: String
@@ -101,8 +105,8 @@ Resources:
       ContainerDefinitions:
         - Name: aws-otel-collector
           Image: public.ecr.aws/aws-observability/aws-otel-collector:v0.21.1
-          Memory: 300
-          Cpu: 50
+          Memory: 200
+          Cpu:   150
           Links: []
           PortMappings:
           - ContainerPort: 2000
@@ -138,7 +142,8 @@ Resources:
               Protocol: tcp
           MountPoints: []
           VolumesFrom: []
-          Memory: 200
+          Memory: 300
+          Cpu: 850
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -204,6 +209,33 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
       ListenerArn: !Ref Listener
+      Priority: 2
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /xtext-service
+      Actions:
+        - TargetGroupArn: !Ref TargetGroupWs
+          Type: forward
+
+  ListenerRuleHTTPS:
+    DependsOn: ListenerWsHTTPS
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref LoadBalancerListenerHTTPS
+      Priority: 3
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - !Ref Path
+      Actions:
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+
+  ListenerWsHTTPS:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref LoadBalancerListenerHTTPS
       Priority: 2
       Conditions:
         - Field: path-pattern
@@ -310,7 +342,7 @@ Resources:
         - Name: ServiceName
           Value: !GetAtt Service.Name
       Statistic: Maximum
-      Period: "60"
+      Period: "20"
       EvaluationPeriods: "3"
       Threshold: "90"
       ComparisonOperator: GreaterThanThreshold
@@ -330,11 +362,10 @@ Resources:
         - Name: ServiceName
           Value: !GetAtt Service.Name
       Statistic: Maximum
-      Period: "60"
+      Period: "20"
       EvaluationPeriods: "10"
       Threshold: "70"
       ComparisonOperator: LessThanThreshold
       AlarmActions:
         - !Ref ServiceScaleInPolicy
-
 

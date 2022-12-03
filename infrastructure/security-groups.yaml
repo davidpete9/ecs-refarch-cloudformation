@@ -74,5 +74,5 @@ Outputs:
     Value: !Ref LoadBalancerSecurityGroup
 
   BastionHostSecurityGroup:
-    Description: A r the security group for bastion host.
+    Description:  The security group for bastion host.
     Value: !Ref BastionHostSecurityGroup
