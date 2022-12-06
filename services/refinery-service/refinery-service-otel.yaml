@@ -31,7 +31,7 @@ Parameters:
   MaxCount:
     Description: Maximum number of instances of this task we can run across our cluster
     Type: Number
-    Default: 3
+    Default: 10
 
   ECSServiceAutoScalingRoleARN:
     Description: The ECS service auto scaling role ARN
@@ -185,6 +185,8 @@ Resources:
           Value: true
         - Key: stickiness.type
           Value: lb_cookie
+        - Key: load_balancing.algorithm.type
+          Value: least_outstanding_requests
       HealthCheckIntervalSeconds: 20
       HealthCheckPath: /xtext-service
       HealthCheckProtocol: HTTP
@@ -309,7 +311,7 @@ Resources:
       ScalingTargetId: !Ref ServiceScalableTarget
       StepScalingPolicyConfiguration:
         AdjustmentType: ChangeInCapacity
-        Cooldown: 1800
+        Cooldown: 120
         MetricAggregationType: Average
         StepAdjustments:
           - MetricIntervalLowerBound: 0
@@ -323,7 +325,7 @@ Resources:
       ScalingTargetId: !Ref ServiceScalableTarget
       StepScalingPolicyConfiguration:
         AdjustmentType: ChangeInCapacity
-        Cooldown: 1800
+        Cooldown: 120
         MetricAggregationType: Average
         StepAdjustments:
           - MetricIntervalUpperBound: 0
@@ -341,10 +343,10 @@ Resources:
           Value: !Ref Cluster
         - Name: ServiceName
           Value: !GetAtt Service.Name
-      Statistic: Maximum
-      Period: "20"
-      EvaluationPeriods: "3"
-      Threshold: "90"
+      Statistic: Average
+      Period: "60"
+      EvaluationPeriods: "1"
+      Threshold: "80"
       ComparisonOperator: GreaterThanThreshold
       AlarmActions:
         - !Ref ServiceScaleOutPolicy
@@ -361,10 +363,10 @@ Resources:
           Value: !Ref Cluster
         - Name: ServiceName
           Value: !GetAtt Service.Name
-      Statistic: Maximum
-      Period: "20"
-      EvaluationPeriods: "10"
-      Threshold: "70"
+      Statistic: Average
+      Period: "60"
+      EvaluationPeriods: "6"
+      Threshold: "45"
       ComparisonOperator: LessThanThreshold
       AlarmActions:
         - !Ref ServiceScaleInPolicy
